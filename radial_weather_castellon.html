@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Castellón 2025 Temperatures</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.6/d3.min.js"></script>
+    <link href='https://fonts.googleapis.com/css?family=Open+Sans:300,400' rel='stylesheet' type='text/css'>
+    <style>
+        body { font-family: 'Open Sans', sans-serif; text-align: center; fill: #8C8C8C; background: #fff; margin: 0; padding: 20px; }
+        .page-header { font-size: 32px; font-weight: 300; color: #222; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 2px; }
+        .city { font-size: 24px; fill: #444; font-weight: 400; }
+        .axisText { font-size: 11px; fill: #444; font-weight: 600; text-shadow: 0 1px 0 #fff, 1px 0 0 #fff, -1px 0 0 #fff, 0 -1px 0 #fff; }
+        .legendTitle { font-size: 13px; fill: #333; font-weight: 600; }
+        .axisCircles { fill: none; stroke: #eee; stroke-width: 1px; }
+        .monthSeparator { stroke: #bbb; stroke-width: 1px; stroke-dasharray: 2,4; }
+        .tempBar { cursor: pointer; stroke-linecap: round; }
+        #tooltip { position: absolute; background: white; padding: 12px; border: 1px solid #ccc; border-radius: 8px; opacity: 0; pointer-events: none; box-shadow: 0 4px 15px rgba(0,0,0,0.15); font-size: 13px; color: #333; text-align: left; line-height: 1.5; z-index: 1000; }
+    </style>
+</head>
+<body>
+
+<h1 class="page-header">Castellón 2025 Temperatures</h1>
+<div id="chart"></div>
+<div id="tooltip"></div>
+
+<script>
+//CONFIGURATION
+var API_KEY = 'YOUR_API_KEY_HERE'; 
+var LOCATION = 'Castellon,Spain';
+var YEAR = 2025;
+
+var width = 850, height = 950;
+var innerRadius = 110, outerRadius = 290;
+
+var colorScale = d3.scale.linear().domain([5, 20, 35]).range(["#08519c", "#feb24c", "#f03b20"]);
+var barScale = d3.scale.linear().domain([0, 40]).range([innerRadius, outerRadius]);
+
+var angleScale = d3.time.scale()
+    .domain([new Date(YEAR, 0, 1, 0, 0, 0), new Date(YEAR, 11, 31, 23, 59, 59)])
+    .range([0, 2 * Math.PI]);
+
+var svg = d3.select("#chart").append("svg")
+    .attr("width", width).attr("height", height)
+    .append("g")
+    .attr("transform", "translate(" + width/2 + "," + (height/2 - 50) + ") rotate(-90)");
+
+var tooltip = d3.select("#tooltip");
+
+// STATIC ELEMENTS
+var staticLabels = svg.append("g").attr("transform", "rotate(90)");
+staticLabels.append("text").attr("class", "city").attr("y", -15).attr("text-anchor", "middle").text("Castellón");
+staticLabels.append("text").attr("y", 15).attr("text-anchor", "middle").style("font-size", "14px").text("Daily Records");
+
+svg.selectAll(".axisCircles").data([0, 10, 20, 30, 40]).enter().append("circle").attr("class", "axisCircles").attr("r", d => barScale(d));
+
+staticLabels.selectAll(".degreeText").data([10, 20, 30, 40]).enter().append("text")
+    .attr("class", "axisText")
+    .attr("y", d => barScale(d)) 
+    .attr("dy", "0.35em")
+    .attr("text-anchor", "middle").text(d => d + "°C");
+
+//MONTHS & SEPARATORS
+var monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+svg.selectAll(".monthSeparator")
+    .data(d3.range(12)).enter().append("line")
+    .attr("class", "monthSeparator")
+    .attr("x1", innerRadius).attr("y1", 0)
+    .attr("x2", outerRadius + 20).attr("y2", 0)
+    .attr("transform", d => "rotate(" + (angleScale(new Date(YEAR, d, 1)) * (180 / Math.PI)) + ")");
+
+svg.selectAll(".monthLabel")
+    .data(monthNames).enter().append("text")
+    .attr("class", "axisText")
+    .each(function(d, i) {
+        var angleDeg = angleScale(new Date(YEAR, i, 15)) * (180 / Math.PI);
+        var r = outerRadius + 50;
+        var flip = (angleDeg > 90 && angleDeg < 270) ? 180 : 0;
+        
+        d3.select(this)
+            .attr("text-anchor", "middle")
+            .attr("transform", "rotate(" + angleDeg + ") translate(" + r + ",0) rotate(" + (90 + flip) + ")");
+    })
+    .text(d => d);
+
+//DATA FETCHING
+var allData = [];
+function fetchMonth(mIdx) {
+    if (mIdx > 11) {
+        allData.sort((a, b) => a.date - b.date);
+        renderBars(); 
+        return; 
+    }
+    var start = YEAR + "-" + (mIdx + 1).toString().padStart(2, '0') + "-01";
+    var end = YEAR + "-" + (mIdx + 1).toString().padStart(2, '0') + "-" + new Date(YEAR, mIdx + 1, 0).getDate();
+    var url = "https://api.worldweatheronline.com/premium/v1/past-weather.ashx?key=" + API_KEY + "&q=" + LOCATION + "&format=json&date=" + start + "&enddate=" + end + "&tp=24";
+
+    d3.json(url, function(error, response) {
+        if (!error && response.data.weather) {
+            var parseDate = d3.time.format("%Y-%m-%d").parse;
+            response.data.weather.forEach(function(d) {
+                var min = +d.mintempC, max = +d.maxtempC;
+                allData.push({ date: parseDate(d.date), min: min, max: max, mean: (min + max) / 2 });
+            });
+        }
+        fetchMonth(mIdx + 1);
+    });
+}
+
+function renderBars() {
+    svg.selectAll(".tempBar")
+        .data(allData).enter().append("line")
+        .attr("class", "tempBar")
+        .attr("x1", d => barScale(d.min)).attr("y1", 0)
+        .attr("x2", d => barScale(d.max)).attr("y2", 0)
+        .attr("transform", d => "rotate(" + (angleScale(d.date) * (180 / Math.PI)) + ")")
+        .style("stroke", d => colorScale(d.mean))
+        .style("stroke-width", "1.8px")
+        .on("mouseover", function(d) {
+            tooltip.style("opacity", 1).html(
+                "<strong>" + d.date.toDateString() + "</strong><br/>" +
+                "Max: <span style='color:#f03b20'>" + d.max + "°C</span><br/>" +
+                "Mean: <strong>" + d.mean.toFixed(1) + "°C</strong><br/>" +
+                "Min: <span style='color:#08519c'>" + d.min + "°C</span>"
+            );
+        })
+        .on("mousemove", function() {
+            tooltip.style("left", (d3.event.pageX + 15) + "px").style("top", (d3.event.pageY - 25) + "px");
+        })
+        .on("mouseout", function() { tooltip.style("opacity", 0); });
+}
+
+fetchMonth(0);
+
+//LEGEND 
+var legendGroup = d3.select("svg").append("g")
+    .attr("transform", "translate(" + (width/2 - 150) + ", 840)");
+
+//Legend Title
+legendGroup.append("text")
+    .attr("class", "legendTitle")
+    .attr("x", 150)
+    .attr("y", -10)
+    .attr("text-anchor", "middle")
+    .text("Daily Mean Temperature");
+
+var grad = svg.append("defs").append("linearGradient").attr("id", "grad");
+grad.append("stop").attr("offset", "0%").attr("stop-color", "#08519c");
+grad.append("stop").attr("offset", "50%").attr("stop-color", "#feb24c");
+grad.append("stop").attr("offset", "100%").attr("stop-color", "#f03b20");
+
+legendGroup.append("rect").attr("width", 300).attr("height", 10).style("fill", "url(#grad)");
+legendGroup.append("text").attr("class", "axisText").attr("y", 25).text("5°C");
+legendGroup.append("text").attr("class", "axisText").attr("x", 300).attr("y", 25).attr("text-anchor", "end").text("35°C");
+
+</script>
+</body>
+</html>
